@@ -17,6 +17,9 @@ from keystone import KS_ARCH_X86, KS_MODE_64, Ks
 from loguru import logger
 
 from extract_functions import OSSFuzzDatasetGenerator
+from libclang import set_libclang_path
+
+set_libclang_path()
 
 CODE = b"""\
 xor rax, rax;

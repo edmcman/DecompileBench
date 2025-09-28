@@ -16,9 +16,7 @@ from loguru import logger
 
 from libclang import set_libclang_path
 
-# set_libclang_path()
-clang.cindex.Config.set_library_file('/usr/lib/llvm-16/lib/libclang-16.so.1')
-index = clang.cindex.Index.create()
+set_libclang_path()
 
 repo_path = pathlib.Path(__file__).resolve().parent
 
