@@ -394,7 +394,7 @@ def main():
     if not os.path.exists('tmp_results'):
         os.makedirs('tmp_results')
     all_project_results = {}
-    for project in sorted(dataset["project"]):
+    for project in sorted(set(dataset["project"])):
         result_path = f'tmp_results/{project}_raw_results.json'
         if os.path.exists(result_path):
             with open(result_path, 'r') as f:
