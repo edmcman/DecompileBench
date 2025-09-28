@@ -389,15 +389,12 @@ def main():
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
-    dataset_df = dataset.to_pandas()
-    assert isinstance(dataset_df, pd.DataFrame)
-
     decompilers = None
     opts = None
     if not os.path.exists('tmp_results'):
         os.makedirs('tmp_results')
     all_project_results = {}
-    for project, project_df in sorted(dataset_df.groupby('project'), key=lambda x: x[0]):
+    for project in sorted(dataset["project"]):
         result_path = f'tmp_results/{project}_raw_results.json'
         if os.path.exists(result_path):
             with open(result_path, 'r') as f:
