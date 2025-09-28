@@ -118,11 +118,11 @@ class OSSFuzzDatasetGenerator:
             '--mount_path', '/oss-fuzz',
             '--clean',
             '--sanitizer', sanitizer,
-            '-e', 'CFLAGS=-fPIC -fvisibility=default -Wl,-export-dynamic -Wno-error',
-            '-e', 'CXXFLAGS=-fPIC -fvisibility=default -Wl,-export-dynamic -Wno-error',
-            '-e', 'CC=clang -L/oss-fuzz -lfunction -Wl,-rpath=/oss-fuzz',
-            '-e', 'CXX=clang++ -L/oss-fuzz -lfunction -Wl,-rpath=/oss-fuzz',
-            '-e', 'LDFLAGS=-Qunused-arguments -L/oss-fuzz -lfunction',
+            '-e', 'CFLAGS="-fPIC -fvisibility=default -Wl,-export-dynamic -Wno-error"',
+            '-e', 'CXXFLAGS="-fPIC -fvisibility=default -Wl,-export-dynamic -Wno-error"',
+            '-e', 'CC="clang -L/oss-fuzz -lfunction -Wl,-rpath=/oss-fuzz"',
+            '-e', 'CXX="clang++ -L/oss-fuzz -lfunction -Wl,-rpath=/oss-fuzz"',
+            '-e', 'LDFLAGS="-Qunused-arguments -L/oss-fuzz -lfunction"',
         ]
 
         logger.info(f"Executing build_fuzzer with command: {cmd}")
@@ -387,8 +387,8 @@ class OSSFuzzDatasetGenerator:
                 '-e', 'ARCHITECTURE=x86_64',
                 '-e', 'HELPER=True',
                 '-e', 'FUZZING_LANGUAGE=c++',
-                '-e', 'CFLAGS= -fPIC -fvisibility=default -Wl,-export-dynamic -Wno-error -Qunused-arguments',
-                '-e', 'CXXFLAGS= -fPIC -fvisibility=default -Wl,-export-dynamic -Wno-error -Qunused-arguments',
+                '-e', 'CFLAGS="-fPIC -fvisibility=default -Wl,-export-dynamic -Wno-error -Qunused-arguments"',
+                '-e', 'CXXFLAGS="-fPIC -fvisibility=default -Wl,-export-dynamic -Wno-error -Qunused-arguments"',
                 '-e', 'CC=clang',
                 '-e', 'CXX=clang++',
 
