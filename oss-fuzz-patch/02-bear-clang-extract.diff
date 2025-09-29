@@ -6,7 +6,7 @@ index 64d11095b..f929b5eee 100644
  ENV CCACHE_COMPILERTYPE clang
  
  CMD ["compile"]
-+RUN apt install -y pkg-config python3-apt libssl-dev ninja-build &&     git clone https://github.com/rizsotto/Bear -b master --depth 1 &&     cd Bear &&     cmake -DENABLE_UNIT_TESTS=OFF -DENABLE_FUNC_TESTS=OFF -GNinja -B build &&     ninja -C build install &&     cd .. &&     rm -rf Bear
++RUN apt install -y bear
 +
 +ADD clang-extract.tar.gz /src/clang-extract
 +RUN patchelf --set-interpreter "/src/clang-extract/ld-linux-x86-64.so.2" /src/clang-extract/clang-extract
