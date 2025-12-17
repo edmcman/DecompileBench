@@ -210,7 +210,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     f'OUTPUT_TXT=/challenges/{function_name}/{fuzzer}/base.txt',
                     f'MAPPING_TXT=/challenges/{function_name}/address_mapping.txt',
                     f'LD_PRELOAD=/oss-fuzz/ld.so'
-                ], timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                ], timeout=300, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 # result.check_returncode()
                 with open(str(base_txt_path), 'r') as f:
                     base_result = f.read().split('\n')
