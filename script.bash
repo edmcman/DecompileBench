@@ -66,5 +66,5 @@ python evaluate_rsr.py --config "$DIR/config.yaml" --decompiled-dataset "$DATASE
 python evaluate_rsr.py --config "$DIR/config.yaml" --decompiled-dataset "$DATASET_DIR/decompiled_ds_all" --decompilers "${DECOMPILERS[@]}"
 
 # Run CER evaluation (coverage) on the merged dataset
-python evaluate_cer.py --dataset "$DATASET_DIR/decompiled_ds_all"
+python evaluate_cer.py --dataset "$DATASET_DIR/decompiled_ds_all" --worker-count 4
 
