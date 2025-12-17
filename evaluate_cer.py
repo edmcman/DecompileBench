@@ -270,7 +270,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                         target_difference.append(i)
                 if len(target_difference) == 0:
                     logger.info(
-                        f"--- target txt diff {self.project} {function_name} {fuzzer} {options}")
+                        f"--- target txt diff {self.project} {function_name} {fuzzer} {options} length:0")
                     diff_result[options] = True
                 else:
                     logger.error(
@@ -278,7 +278,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     diff_result[options] = False
             except Exception as e:
                 logger.error(
-                    f"--- target txt diff {self.project} {function_name} {fuzzer} {options}: target txt generation failed", e)
+                    f"--- target txt diff {self.project} {function_name} {fuzzer} {options}: target txt generation failed {e}")
                 diff_result[options] = False
 
         self.exec_in_container(
