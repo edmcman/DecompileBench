@@ -181,15 +181,25 @@ python merge.py --base-dataset-path $dataset_path/ --decompiled-datasets $datase
 
 This section describes the evaluation of decompiled code.
 
-Before evaluation, integrate all decompiler outputs, including those from LLMs, into a single dataset saved at `./decompiled_ds_all`. Then, execute:
+Before evaluation, integrate all decompiler outputs, including those from LLMs, into a single dataset saved at `./decompiled_ds_all`.
+
+**Step 1: Generate base libfunction.so files (required for CER evaluation)**
 
 ```shell
-python evaluate_rsr.py --decompiled-dataset $dataset_path/decompiled_ds --decompilers hexrays
+python evaluate_rsr.py --config ./config.yaml --decompiled-dataset $dataset_path/decompiled_ds --decompilers func
 ```
 
-Enable the debug parameter to print error messages for specific data. This script recompiles the specified decompiler outputs in Docker, applies fixes, and reports success rates across different optimization levels. Successfully compiled functions are stored as shared libraries in `{oss_fuzz_path}/build/challenges` for further evaluation.
+This compiles the original extracted functions into ground-truth shared libraries at `{oss_fuzz_path}/build/challenges/{project}/{function}/libfunction.so`.
 
-To assess coverage differences before and after replacing with decompiled code, run:
+**Step 2: Evaluate decompiler outputs**
+
+```shell
+python evaluate_rsr.py --config ./config.yaml --decompiled-dataset $dataset_path/decompiled_ds --decompilers hexrays
+```
+
+Enable the debug parameter to print error messages for specific data. This script recompiles the specified decompiler outputs in Docker, applies fixes, and reports success rates across different optimization levels.
+
+**Step 3: Assess coverage differences**
 
 ```shell
 python evaluate_cer.py --dataset $dataset_path/decompiled_ds
