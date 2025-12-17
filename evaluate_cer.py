@@ -211,10 +211,15 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     f'OUTPUT_TXT=/challenges/{function_name}/{fuzzer}/base.txt',
                     f'MAPPING_TXT=/challenges/{function_name}/address_mapping.txt',
                     f'LD_PRELOAD=/oss-fuzz/ld.so'
-                ], timeout=TIMEOUT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                # result.check_returncode()
+                ], timeout=TIMEOUT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                if result.returncode != 0:
+                    logger.error(f"Base coverage generation failed with exit code {result.returncode}")
+                    logger.error(f"stdout: {result.stdout.decode('utf-8', errors='replace') if result.stdout else ''}")
+                    logger.error(f"stderr: {result.stderr.decode('utf-8', errors='replace') if result.stderr else ''}")
+                    raise Exception(f"Base coverage generation failed with exit code {result.returncode}")
+                # Stream file line-by-line to reduce memory usage
                 with open(str(base_txt_path), 'r') as f:
-                    base_result = f.read().split('\n')
+                    base_result = [line.rstrip('\n') for line in f]
                 if txt_length != 0 and len(base_result) != txt_length:
                     logger.error(
                         f"base txt length mismatch, expected {txt_length}, got {len(base_result)}")
@@ -254,21 +259,26 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
             target_txt_path = pathlib.Path(self.oss_fuzz_path) / 'build' / 'challenges' / \
                 self.project / function_name / fuzzer / f'{options}.txt'
             try:
-                self.exec_in_container(cmd=cmd, envs=[
+                result = self.exec_in_container(cmd=cmd, envs=[
                     f'LD_LIBRARY_PATH={target_lib_path}:/work/lib/',
                     f'LLVM_PROFILE_FILE=/challenges/{function_name}/{fuzzer}/{options}.profraw',
                     f'OUTPUT_PROFDATA=/challenges/{function_name}/{fuzzer}/{options}.profdata',
                     f'OUTPUT_TXT=/challenges/{function_name}/{fuzzer}/{options}.txt',
                     f'MAPPING_TXT=/challenges/{function_name}/address_mapping.txt',
                     f'LD_PRELOAD=/oss-fuzz/ld.so',
-                ], timeout=TIMEOUT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                # result.check_returncode()
-                with open(str(target_txt_path), 'r') as f:
-                    target_result = f.read().split('\n')
+                ], timeout=TIMEOUT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                if result.returncode != 0:
+                    logger.error(f"Target coverage generation failed for {options} with exit code {result.returncode}")
+                    logger.error(f"stdout: {result.stdout.decode('utf-8', errors='replace') if result.stdout else ''}")
+                    logger.error(f"stderr: {result.stderr.decode('utf-8', errors='replace') if result.stderr else ''}")
+                    raise Exception(f"Target coverage generation failed for {options} with exit code {result.returncode}")
+                # Stream and compare line-by-line to reduce memory usage
                 target_difference = []
-                for i, line in enumerate(target_result):
-                    if len(log_set[i]) == 1 and line not in log_set[i]:
-                        target_difference.append(i)
+                with open(str(target_txt_path), 'r') as f:
+                    for i, line in enumerate(f):
+                        line = line.rstrip('\n')
+                        if len(log_set[i]) == 1 and line not in log_set[i]:
+                            target_difference.append(i)
                 if len(target_difference) == 0:
                     logger.info(
                         f"--- target txt diff {self.project} {function_name} {fuzzer} {options} length:0")
