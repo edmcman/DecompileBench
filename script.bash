@@ -5,6 +5,7 @@ DATASET_DIR="$DIR/dataset"
 DECOMPILERS=("ghidra" "hexrays")
 #PROJECTS=("minizip" "avahi" "qt" "libdwarf" "c-blosc" "unbound" "qpdf" "file" "wavpack" "libsrtp" "fribidi" "libconfig" "jansson" "strongswan" "pjsip" "croaring")
 PROJECTS=("file")
+WORKERS=4
 export LIBCLANG_PATH="/usr/lib/llvm-18/lib/libclang-18.so.1"
 
 test -f "$LIBCLANG_PATH" || { echo "Please set LIBCLANG_PATH correctly."; exit 1; }
@@ -22,7 +23,7 @@ set -xeuo pipefail
 # create a comma-separated project list from the PROJECTS array
 PROJECTS_CSV="$(IFS=, ; echo "${PROJECTS[*]}")"
 echo "Using projects: $PROJECTS_CSV"
-python extract_functions.py --config "$DIR/config.yaml" --project "$PROJECTS_CSV"
+python extract_functions.py --worker-count "$WORKERS" --config "$DIR/config.yaml" --project "$PROJECTS_CSV"
 
 python compile_ossfuzz.py --config "$DIR/config.yaml" --output "$DATASET_DIR"
 
@@ -66,5 +67,5 @@ python evaluate_rsr.py --config "$DIR/config.yaml" --decompiled-dataset "$DATASE
 python evaluate_rsr.py --config "$DIR/config.yaml" --decompiled-dataset "$DATASET_DIR/decompiled_ds_all" --decompilers "${DECOMPILERS[@]}"
 
 # Run CER evaluation (coverage) on the merged dataset
-python evaluate_cer.py --dataset "$DATASET_DIR/decompiled_ds_all" --worker-count 4
+python evaluate_cer.py --dataset "$DATASET_DIR/decompiled_ds_all" --worker-count "$WORKERS"
 
