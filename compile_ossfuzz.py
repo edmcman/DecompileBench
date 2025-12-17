@@ -216,7 +216,7 @@ def compile(row, container: DockerContainer):
                 'path': str(output_file.relative_to(OUTPUT_PATH)),
             })
     except subprocess.CalledProcessError as e:
-        logger.error(f"Error compiling {idx} with {opt}: {e}")
+        logger.error(f"Error compiling {idx}: {e}")
     finally:
         # os.remove(filepath)
         pass

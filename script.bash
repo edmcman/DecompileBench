@@ -62,8 +62,8 @@ python merge.py --base-dataset-path "$DATASET_DIR" --decompiled-datasets "$DATAS
 # Generate base libfunction.so files required for CER evaluation
 python evaluate_rsr.py --config "$DIR/config.yaml" --decompiled-dataset "$DATASET_DIR/decompiled_ds_all" --decompilers func
 
-# Evaluate RSR for the configured traditional decompilers
-python evaluate_rsr.py --config "$DIR/config.yaml" --decompiled-dataset "$DATASET_DIR/decompiled_ds_all" --decompilers "$DECOMPILERS_CSV"
+# Evaluate RSR for the configured traditional decompilers (space-separated list)
+python evaluate_rsr.py --config "$DIR/config.yaml" --decompiled-dataset "$DATASET_DIR/decompiled_ds_all" --decompilers "${DECOMPILERS[@]}"
 
 # Run CER evaluation (coverage) on the merged dataset
 python evaluate_cer.py --dataset "$DATASET_DIR/decompiled_ds_all"

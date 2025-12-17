@@ -430,8 +430,7 @@ def main():
     try:
         show_statistics(all_project_results, dataset, decompilers, opts)
     except Exception as e:
-        import ipdb
-        ipdb.set_trace()
+        logger.exception("Error while showing statistics")
 
 
 if __name__ == '__main__':
