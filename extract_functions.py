@@ -445,7 +445,7 @@ def main():
             break
         except Exception as e:
             logger.error(f"Error in {project}: {e}")
-            raise
+            #raise
 
 
 if __name__ == '__main__':
