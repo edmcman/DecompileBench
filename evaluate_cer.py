@@ -211,12 +211,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     f'OUTPUT_TXT=/challenges/{function_name}/{fuzzer}/base.txt',
                     f'MAPPING_TXT=/challenges/{function_name}/address_mapping.txt',
                     f'LD_PRELOAD=/oss-fuzz/ld.so'
-                ], timeout=TIMEOUT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-                if result.returncode != 0:
-                    logger.error(f"Base coverage generation failed with exit code {result.returncode}")
-                    logger.error(f"stdout: {result.stdout.decode('utf-8', errors='replace') if result.stdout else ''}")
-                    logger.error(f"stderr: {result.stderr.decode('utf-8', errors='replace') if result.stderr else ''}")
-                    raise Exception(f"Base coverage generation failed with exit code {result.returncode}")
+                ], timeout=TIMEOUT, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 # Stream file line-by-line to reduce memory usage
                 with open(str(base_txt_path), 'r') as f:
                     base_result = [line.rstrip('\n') for line in f]
@@ -236,6 +231,11 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                 if idx < max_trails - 1:
                     prev_diff_length = diff_length
 
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Base coverage generation failed with exit code {e.returncode}")
+                logger.error(f"stdout: {e.stdout.decode('utf-8', errors='replace') if e.stdout else ''}")
+                logger.error(f"stderr: {e.stderr.decode('utf-8', errors='replace') if e.stderr else ''}")
+                return (fuzzer, function_name, {})
             except Exception as e:
                 logger.error(
                     f"base txt generation failed:{e}")
@@ -266,12 +266,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     f'OUTPUT_TXT=/challenges/{function_name}/{fuzzer}/{options}.txt',
                     f'MAPPING_TXT=/challenges/{function_name}/address_mapping.txt',
                     f'LD_PRELOAD=/oss-fuzz/ld.so',
-                ], timeout=TIMEOUT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-                if result.returncode != 0:
-                    logger.error(f"Target coverage generation failed for {options} with exit code {result.returncode}")
-                    logger.error(f"stdout: {result.stdout.decode('utf-8', errors='replace') if result.stdout else ''}")
-                    logger.error(f"stderr: {result.stderr.decode('utf-8', errors='replace') if result.stderr else ''}")
-                    raise Exception(f"Target coverage generation failed for {options} with exit code {result.returncode}")
+                ], timeout=TIMEOUT, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 # Stream and compare line-by-line to reduce memory usage
                 target_difference = []
                 with open(str(target_txt_path), 'r') as f:
@@ -287,6 +282,11 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     logger.error(
                         f"--- target txt diff {self.project} {function_name} {fuzzer} {options}, differences length:{len(target_difference)}")
                     diff_result[options] = False
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Target coverage generation failed for {options} with exit code {e.returncode}")
+                logger.error(f"stdout: {e.stdout.decode('utf-8', errors='replace') if e.stdout else ''}")
+                logger.error(f"stderr: {e.stderr.decode('utf-8', errors='replace') if e.stderr else ''}")
+                diff_result[options] = False
             except Exception as e:
                 logger.error(
                     f"--- target txt diff {self.project} {function_name} {fuzzer} {options}: target txt generation failed {e}")
