@@ -362,7 +362,7 @@ def main():
             compile_rate = per_opt_df['flag_compile'].mean()
 
             print(
-                f"Optimization {opt}: Compile Rate: {compile_rate:.4f}")
+                f"{d} Optimization {opt}: Compile Rate: {compile_rate:.4f}")
         print('-' * 30)
 
     rm_docker_cmd = "docker rm -f evaluate_in_docker"
