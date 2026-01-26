@@ -3,6 +3,8 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DATASET_DIR="$DIR/dataset"
 DECOMPILERS=("ghidra" "hexrays")
+# libdwarf is huge
+#PROJECTS=("minizip" "avahi" "qt" "c-blosc" "unbound")
 #PROJECTS=("minizip" "avahi" "qt" "libdwarf" "c-blosc" "unbound" "qpdf" "file" "wavpack" "libsrtp" "fribidi" "libconfig" "jansson" "strongswan" "pjsip" "croaring")
 PROJECTS=("file")
 WORKERS=4
@@ -12,13 +14,42 @@ test -f "$LIBCLANG_PATH" || { echo "Please set LIBCLANG_PATH correctly."; exit 1
 
 test -f "$DIR/libfunction.so" || { echo "Please build libfunction.so first."; exit 1; }
 
-test -d "$DIR/oss-fuzz/build" && { echo "Build directory already exists. Please remove it before running this script."; exit 1; }
+# helper: exit with message if a directory exists; if REMOVE=true then delete it
+die_if_dir_exists() {
+	local dir="$1"
+	local label="$2"
+	if [ -d "$dir" ]; then
+		if [ "${REMOVE:-false}" = true ]; then
+			echo "Removing directory: $dir"
+			sudo rm -rf "$dir"
+		else
+			echo "$label directory already exists: $dir. Please remove it before running this script."
+			exit 1
+		fi
+	fi
+}
 
-test -d "$DATASET_DIR" && { echo "Dataset directory already exists. Please remove it before running this script."; exit 1; }
+# NOTE: directory removal is now handled by die_if_dir_exists when --rm is passed
 
-test -d "$DIR/tmp_results" && { echo "Temporary results directory already exists. Please remove it before running this script."; exit 1; }
+# parse options using getopts
+REMOVE=false
+usage() { echo "Usage: $0 [-r]"; exit 0; }
+
+while getopts ":rh" opt; do
+	case "$opt" in
+		r) REMOVE=true ;;
+		h) usage ;;
+		\?) echo "Unknown option: -$OPTARG"; usage ;;
+	esac
+done
+shift $((OPTIND -1))
 
 set -xeuo pipefail
+
+# check directories are absent before proceeding
+die_if_dir_exists "$DIR/oss-fuzz/build" "Build"
+die_if_dir_exists "$DATASET_DIR" "Dataset"
+die_if_dir_exists "$DIR/tmp_results" "Temporary results"
 
 # create a comma-separated project list from the PROJECTS array
 PROJECTS_CSV="$(IFS=, ; echo "${PROJECTS[*]}")"
