@@ -194,48 +194,71 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
             f'llvm-cov show -instr-profile $OUTPUT_PROFDATA -object=/out/{fuzzer}_{function_name}_patched > $OUTPUT_TXT'
         ]
 
-        base_txt_path = pathlib.Path(self.oss_fuzz_path) / 'build' / \
-            'challenges' / self.project / function_name / fuzzer / 'base.txt'
         max_trails = 5
         txt_length = 0
         log_set = []
 
         diff_length = 0
         prev_diff_length = 0
+        # run the base coverage 5 times to detect non-determinism
         for idx in range(max_trails):
             try:
-                result = self.exec_in_container(cmd=cmd, envs=[
+                proc = self.exec_in_container(cmd=cmd, envs=[
                     f'LD_LIBRARY_PATH=/challenges/{function_name}:/work/lib/',
                     f'LLVM_PROFILE_FILE=/challenges/{function_name}/{fuzzer}/base.profraw',
                     f'OUTPUT_PROFDATA=/challenges/{function_name}/{fuzzer}/base.profdata',
-                    f'OUTPUT_TXT=/challenges/{function_name}/{fuzzer}/base.txt',
+                    'OUTPUT_TXT=/dev/stdout',
                     f'MAPPING_TXT=/challenges/{function_name}/address_mapping.txt',
                     f'LD_PRELOAD=/oss-fuzz/ld.so'
-                ], timeout=TIMEOUT, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                # Stream file line-by-line to reduce memory usage
-                with open(str(base_txt_path), 'r') as f:
-                    base_result = [line.rstrip('\n') for line in f]
-                if txt_length != 0 and len(base_result) != txt_length:
-                    logger.error(
-                        f"base txt length mismatch, expected {txt_length}, got {len(base_result)}")
+                ], stream=True)
+                if proc.stdout is None:
+                    logger.error("base coverage generation failed: stdout not captured")
                     return (fuzzer, function_name, {})
-                txt_length = len(base_result)
-                if len(log_set) == 0:
-                    log_set = [set() for _ in range(txt_length)]
-                for i, line in enumerate(base_result):
-                    log_set[i].add(line)
+                line_count = 0
+                too_long = False
+                for line in proc.stdout:
+                    line = line.rstrip('\n')
+                    if txt_length == 0:
+                        log_set.append(set())
+                    elif line_count >= txt_length:
+                        too_long = True
+                        break
+                    log_set[line_count].add(line)
+                    line_count += 1
+                if too_long:
+                    proc.kill()
+                    proc.wait()
+                    logger.error(
+                        f"base txt length mismatch, expected {txt_length}, got more than {txt_length}")
+                    return (fuzzer, function_name, {})
+                try:
+                    proc.wait(timeout=TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                    logger.error("Base coverage generation timed out")
+                    return (fuzzer, function_name, {})
+                if proc.returncode != 0:
+                    stderr = proc.stderr.read() if proc.stderr else ''
+                    if isinstance(stderr, bytes):
+                        stderr = stderr.decode('utf-8', errors='replace')
+                    logger.error(
+                        f"Base coverage generation failed with exit code {proc.returncode}")
+                    logger.error(f"stderr: {stderr}")
+                    return (fuzzer, function_name, {})
+                if txt_length != 0 and line_count != txt_length:
+                    logger.error(
+                        f"base txt length mismatch, expected {txt_length}, got {line_count}")
+                    return (fuzzer, function_name, {})
+                if txt_length == 0:
+                    txt_length = line_count
                 diff_length = len([log for log in log_set if len(log) > 1])
-                if diff_length == prev_diff_length and idx >0:
-                    logger.info(f"diff length: {diff_length}")
+                if diff_length == prev_diff_length and idx > 0:
+                    # no non-determinism detected, break early
                     break
                 if idx < max_trails - 1:
                     prev_diff_length = diff_length
 
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Base coverage generation failed with exit code {e.returncode}")
-                logger.error(f"stdout: {e.stdout.decode('utf-8', errors='replace') if e.stdout else ''}")
-                logger.error(f"stderr: {e.stderr.decode('utf-8', errors='replace') if e.stderr else ''}")
-                return (fuzzer, function_name, {})
             except Exception as e:
                 logger.error(
                     f"base txt generation failed:{e}")
@@ -276,32 +299,34 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                             target_difference.append(i)
                 if len(target_difference) == 0:
                     logger.info(
-                        f"--- target txt diff {self.project} {function_name} {fuzzer} {options} length:0")
+                        f"--- PASS target txt diff {self.project} {function_name} {fuzzer} {options} length:0")
                     diff_result[options] = True
                 else:
                     logger.error(
-                        f"--- target txt diff {self.project} {function_name} {fuzzer} {options}, differences length:{len(target_difference)}")
+                        f"--- FAIL target txt diff {self.project} {function_name} {fuzzer} {options}, differences length:{len(target_difference)}")
                     diff_result[options] = False
             except subprocess.CalledProcessError as e:
-                logger.error(f"Target coverage generation failed for {options} with exit code {e.returncode}")
+                logger.error(f"--- CRASH Target coverage generation failed for {self.project} {function_name} {fuzzer} {options} with exit code {e.returncode}")
                 logger.error(f"stdout: {e.stdout.decode('utf-8', errors='replace') if e.stdout else ''}")
                 logger.error(f"stderr: {e.stderr.decode('utf-8', errors='replace') if e.stderr else ''}")
                 diff_result[options] = False
             except Exception as e:
                 logger.error(
-                    f"--- target txt diff {self.project} {function_name} {fuzzer} {options}: target txt generation failed {e}")
+                    f"--- CRASH Target coverage generation failed {self.project} {function_name} {fuzzer} {options}: {e}")
                 diff_result[options] = False
 
-        self.exec_in_container(
-            [
-                'bash', '-c',
-                f'''
-                    rm -rf /challenges/{function_name}/{fuzzer}/*.txt
-                    rm -rf /challenges/{function_name}/{fuzzer}/*.profraw
-                    rm -rf /challenges/{function_name}/{fuzzer}/*.profdata
-                ''',
-            ]
-        )
+        # Temporary
+        if True:
+            self.exec_in_container(
+                [
+                    'bash', '-c',
+                    f'''
+                        rm -rf /challenges/{function_name}/{fuzzer}/*.txt
+                        rm -rf /challenges/{function_name}/{fuzzer}/*.profraw
+                        rm -rf /challenges/{function_name}/{fuzzer}/*.profdata
+                    ''',
+                ]
+            )
 
         return (fuzzer, function_name, diff_result)
 
@@ -411,6 +436,10 @@ def main():
             with open(result_path, 'r') as f:
                 all_project_results[project] = json.load(f)
             logger.info(f"Loaded existing results for {project}")
+            if not decompilers or not opts:
+                evaluator = ReexecutableRateEvaluator(config, project)
+                decompilers = evaluator.decompilers
+                opts = evaluator.opt_options
             continue
         try:
             print(config_path, project)

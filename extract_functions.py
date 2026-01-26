@@ -330,6 +330,7 @@ class OSSFuzzDatasetGenerator:
     def exec_in_container(self, cmd, cwd=None, envs=[], **kwargs):
         if not self.container_running:
             raise Exception("Container is not running")
+        stream = kwargs.pop('stream', False)
         cmd = [
             'docker', 'exec',
             '-w', str(cwd) if cwd else str('/'),
@@ -337,6 +338,21 @@ class OSSFuzzDatasetGenerator:
             self.container_name,
             *cmd
         ]
+        if stream:
+            kwargs.pop('check', None)
+            kwargs.pop('timeout', None)
+            stdout = kwargs.pop('stdout', subprocess.PIPE)
+            stderr = kwargs.pop('stderr', subprocess.PIPE)
+            text = kwargs.pop('text', True)
+            bufsize = kwargs.pop('bufsize', 1)
+            return subprocess.Popen(
+                cmd,
+                stdout=stdout,
+                stderr=stderr,
+                text=text,
+                bufsize=bufsize,
+                **kwargs,
+            )
         return subprocess.run(cmd, check=True, **kwargs)
 
     @property
