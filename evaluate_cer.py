@@ -215,22 +215,12 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     logger.error("base coverage generation failed: stdout not captured")
                     return (fuzzer, function_name, {})
                 line_count = 0
-                too_long = False
                 for line in proc.stdout:
                     line = line.rstrip('\n')
                     if txt_length == 0:
                         log_set.append(set())
-                    elif line_count >= txt_length:
-                        too_long = True
-                        break
                     log_set[line_count].add(line)
                     line_count += 1
-                if too_long:
-                    proc.kill()
-                    proc.wait()
-                    logger.error(
-                        f"base txt length mismatch, expected {txt_length}, got more than {txt_length}")
-                    return (fuzzer, function_name, {})
                 try:
                     proc.wait(timeout=TIMEOUT)
                 except subprocess.TimeoutExpired:
