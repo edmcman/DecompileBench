@@ -9,6 +9,7 @@ import tempfile
 from contextlib import contextmanager
 from multiprocessing import Pool
 from typing import List
+from jsonslicer import JsonSlicer
 
 import clang.cindex
 import yaml
@@ -180,17 +181,17 @@ class OSSFuzzDatasetGenerator:
             self.oss_fuzz_path) / 'build' / 'stats' / self.project / f'{fuzzer}_result.json'
         if not stats_path.exists():
             return {}
-        with open(stats_path, 'r') as f:
-            data = json.load(f)
         functions = {}
-        for function in data['data'][0]['functions']:
-            c_files = [
-                file for file in function['filenames']
-                if file.endswith('.c')
-            ]
-            if function['count'] < 10 or not c_files or ':' in function['name'] or function['name'] == 'LLVMFuzzerTestOneInput' or any([fuzzer in file for file in c_files]) or not any([self.project in file for file in c_files]):
-                continue
-            functions[function['name']] = c_files[0]
+        logger.info(f"Processing stats file: {stats_path}")
+        with open(stats_path, 'rb') as f:
+            for function in JsonSlicer(f, ('data', 0, 'functions', None)):
+                c_files = [
+                    file for file in function['filenames']
+                    if file.endswith('.c')
+                ]
+                if function['count'] < 10 or not c_files or ':' in function['name'] or function['name'] == 'LLVMFuzzerTestOneInput' or any([fuzzer in file for file in c_files]) or not any([self.project in file for file in c_files]):
+                    continue
+                functions[function['name']] = c_files[0]
         return functions
 
     def extract_for_function(self, function_name, source_path):
