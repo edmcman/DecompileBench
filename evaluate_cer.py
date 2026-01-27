@@ -213,16 +213,12 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
         output_mapping_path = base_lib_path.parent / 'address_mapping.txt'
         get_func_offsets(base_lib_path, patched_fuzzer_path,
                          output_mapping_path)
-        # It's a giant hack to use -show-regions here.  It seems that there is a
-        # bug when printing the columns sometimes that results in 2^32 spaces.
-        # -show-regions seems to avoid the problem but still includes the
-        # hitcounts so I think it should be ok.
         cmd = [
             'bash',
             '-c',
             f'/out/{fuzzer}_{function_name}_patched -runs=0 -seed=3918206239 /corpus/{fuzzer} && ' +
             'llvm-profdata merge -sparse $LLVM_PROFILE_FILE -o $OUTPUT_PROFDATA && ' +
-            f'llvm-cov show -show-regions -instr-profile $OUTPUT_PROFDATA -object=/out/{fuzzer}_{function_name}_patched > $OUTPUT_TXT'
+            f'llvm-cov show -instr-profile $OUTPUT_PROFDATA -object=/out/{fuzzer}_{function_name}_patched > $OUTPUT_TXT'
         ]
 
         max_trails = 5
@@ -233,7 +229,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
         base_show_cmd = [
             'bash',
             '-c',
-            f'llvm-cov show -show-regions -instr-profile {base_profdata_ref} -object=/out/{fuzzer}_{function_name}_patched'
+            f'llvm-cov show -instr-profile {base_profdata_ref} -object=/out/{fuzzer}_{function_name}_patched'
         ]
         base_show_envs = [
             f'LD_LIBRARY_PATH=/challenges/{function_name}:/work/lib/',
