@@ -166,7 +166,7 @@ class OSSFuzzDatasetGenerator:
             '--mount', f'{repo_path}:/oss-fuzz',
             '--no-serve',
         ]
-        logger.info(f"Running coverage for {fuzzer}, cmd: {' '.join(cmd)}")
+        logger.info(f"Running coverage for fuzzer {fuzzer}, cmd: {' '.join(cmd)}")
         subprocess.run(cmd, cwd=cwd, check=True)
         logger.info(f"Coverage success for {fuzzer}")
 

@@ -132,19 +132,28 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
             logger.info(f"Testing {task_count} functions")
 
             processed_results = {}
-            with Pool(WORKER_COUNT) as pool:
-                results_iter = pool.imap_unordered(
-                    self._link_and_test_for_function_star,
-                    iter_tasks(),
-                    chunksize=1,
-                )
+            if WORKER_COUNT == 1:
                 for result in tqdm(
-                    results_iter,
+                    map(self._link_and_test_for_function_star, iter_tasks()),
                     total=task_count,
                     desc="Testing functions",
                     unit="fn",
                 ):
                     add_result(processed_results, result)
+            else:
+                with Pool(WORKER_COUNT) as pool:
+                    results_iter = pool.imap_unordered(
+                        self._link_and_test_for_function_star,
+                        iter_tasks(),
+                        chunksize=1,
+                    )
+                    for result in tqdm(
+                        results_iter,
+                        total=task_count,
+                        desc="Testing functions",
+                        unit="fn",
+                    ):
+                        add_result(processed_results, result)
             self.exec_in_container(
                 [
                     'bash', '-c',
