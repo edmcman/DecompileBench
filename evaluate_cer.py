@@ -120,10 +120,9 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
             print(f"Skipping {self.project} as it is not a C/C++ project")
             return
         with self.start_container(keep=False):
-            logger.info("Linking and Testing Fuzzers")
-            # return parallel_link_and_test(self)
 
             def iter_tasks():
+                logger.info("Loading covered functions")
                 for fuzzer, function_info in self.functions.items():
                     for function in function_info:
                         yield (fuzzer, function)
@@ -218,7 +217,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
             '-c',
             f'/out/{fuzzer}_{function_name}_patched -runs=0 -seed=3918206239 /corpus/{fuzzer} && ' +
             'llvm-profdata merge -sparse $LLVM_PROFILE_FILE -o $OUTPUT_PROFDATA && ' +
-            f'llvm-cov show -instr-profile $OUTPUT_PROFDATA -object=/out/{fuzzer}_{function_name}_patched > $OUTPUT_TXT'
+            f'llvm-cov show -show-instantiations=false -instr-profile $OUTPUT_PROFDATA -object=/out/{fuzzer}_{function_name}_patched > $OUTPUT_TXT'
         ]
 
         max_trails = 5
@@ -226,10 +225,11 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
         nondet = []
         base_profdata = f'/challenges/{function_name}/{fuzzer}/base.profdata'
         base_profdata_ref = f'{base_profdata}.ref'
+        # We need show-instantiations=false because otherwise it changes the number of lines emitted
         base_show_cmd = [
             'bash',
             '-c',
-            f'llvm-cov show -instr-profile {base_profdata_ref} -object=/out/{fuzzer}_{function_name}_patched'
+            f'llvm-cov show -show-instantiations=false -instr-profile {base_profdata_ref} -object=/out/{fuzzer}_{function_name}_patched'
         ]
         base_show_envs = [
             f'LD_LIBRARY_PATH=/challenges/{function_name}:/work/lib/',
