@@ -4,10 +4,10 @@ import os
 import pathlib
 import subprocess
 from multiprocessing import Pool
+from itertools import zip_longest
 
 import datasets
 import lief
-import pandas as pd
 import yaml
 from datasets import load_from_disk
 from elftools.elf.elffile import ELFFile
@@ -15,6 +15,7 @@ from elftools.elf.relocation import RelocationSection
 from elftools.elf.sections import SymbolTableSection
 from keystone import KS_ARCH_X86, KS_MODE_64, Ks
 from loguru import logger
+from tqdm import tqdm
 
 from extract_functions import OSSFuzzDatasetGenerator
 from libclang import set_libclang_path
@@ -122,21 +123,38 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
             logger.info("Linking and Testing Fuzzers")
             # return parallel_link_and_test(self)
 
-            tasks = []
-            for fuzzer, function_info in self.functions.items():
-                for function, _ in function_info.items():
-                    tasks.append((fuzzer, function))
+            def iter_tasks():
+                for fuzzer, function_info in self.functions.items():
+                    for function in function_info:
+                        yield (fuzzer, function)
 
-            logger.info(f"Testing {len(tasks)} functions")
-            results = Pool(WORKER_COUNT).starmap(
-                self.link_and_test_for_function, tasks)
+            task_count = sum(len(function_info) for function_info in self.functions.values())
+            logger.info(f"Testing {task_count} functions")
+
+            processed_results = {}
+            with Pool(WORKER_COUNT) as pool:
+                results_iter = pool.imap_unordered(
+                    self._link_and_test_for_function_star,
+                    iter_tasks(),
+                    chunksize=1,
+                )
+                for result in tqdm(
+                    results_iter,
+                    total=task_count,
+                    desc="Testing functions",
+                    unit="fn",
+                ):
+                    add_result(processed_results, result)
             self.exec_in_container(
                 [
                     'bash', '-c',
                     'rm -rf /out/*_patched',
                 ],
             )
-            return results
+            return processed_results
+
+    def _link_and_test_for_function_star(self, args):
+        return self.link_and_test_for_function(*args)
 
     def link_and_test_for_function(self, fuzzer, function_name):
         try:
@@ -196,11 +214,59 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
 
         max_trails = 5
         txt_length = 0
-        log_set = []
+        nondet = []
+        base_profdata = f'/challenges/{function_name}/{fuzzer}/base.profdata'
+        base_profdata_ref = f'{base_profdata}.ref'
+        base_show_cmd = [
+            'bash',
+            '-c',
+            f'llvm-cov show -instr-profile {base_profdata_ref} -object=/out/{fuzzer}_{function_name}_patched'
+        ]
+        base_show_envs = [
+            f'LD_LIBRARY_PATH=/challenges/{function_name}:/work/lib/',
+            f'MAPPING_TXT=/challenges/{function_name}/address_mapping.txt',
+        ]
+
+        def wait_or_fail(proc, timeout, context):
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                logger.error(f"{context} timed out")
+                return False
+            if proc.returncode != 0:
+                stderr = proc.stderr.read() if proc.stderr else ''
+                if isinstance(stderr, bytes):
+                    stderr = stderr.decode('utf-8', errors='replace')
+                logger.error(f"{context} failed with exit code {proc.returncode}")
+                if stderr:
+                    logger.error(f"stderr: {stderr}")
+                return False
+            return True
+
+        # Compare a current stream to the frozen baseline (first run).
+        def compare_streams(base_stream, current_stream, expected_len, on_diff):
+            line_count = 0
+            for i, (base_line, cur_line) in enumerate(zip_longest(base_stream, current_stream, fillvalue=None)):
+                # base_line == None  => base stream ended early (base shorter than current)
+                if base_line is None:
+                    logger.error(
+                        f"base txt length mismatch, {function_name} {fuzzer} expected {expected_len}, got {i + 1}")
+                    return None
+                # cur_line == None => current stream ended early (base had extra lines)
+                if cur_line is None:
+                    logger.error(f"base txt length mismatch, {function_name} {fuzzer} expected fewer lines")
+                    return None
+                if cur_line.rstrip('\n') != base_line.rstrip('\n'):
+                    on_diff(i)
+                line_count += 1
+            return line_count
 
         diff_length = 0
         prev_diff_length = 0
-        # run the base coverage 5 times to detect non-determinism
+        # Run base coverage multiple times; compare each run to the frozen baseline
+        # to mark nondeterministic line indices.
         for idx in range(max_trails):
             try:
                 proc = self.exec_in_container(cmd=cmd, envs=[
@@ -214,35 +280,40 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                 if proc.stdout is None:
                     logger.error("base coverage generation failed: stdout not captured")
                     return (fuzzer, function_name, {})
-                line_count = 0
-                for line in proc.stdout:
-                    line = line.rstrip('\n')
-                    if txt_length == 0:
-                        log_set.append(set())
-                    log_set[line_count].add(line)
-                    line_count += 1
-                try:
-                    proc.wait(timeout=TIMEOUT)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-                    logger.error("Base coverage generation timed out")
-                    return (fuzzer, function_name, {})
-                if proc.returncode != 0:
-                    stderr = proc.stderr.read() if proc.stderr else ''
-                    if isinstance(stderr, bytes):
-                        stderr = stderr.decode('utf-8', errors='replace')
-                    logger.error(
-                        f"Base coverage generation failed with exit code {proc.returncode}")
-                    logger.error(f"stderr: {stderr}")
-                    return (fuzzer, function_name, {})
-                if txt_length != 0 and line_count != txt_length:
-                    logger.error(
-                        f"base txt length mismatch, expected {txt_length}, got {line_count}")
-                    return (fuzzer, function_name, {})
-                if txt_length == 0:
+                if idx == 0:
+                    # First run: establish baseline length and snapshot profdata.
+                    line_count = 0
+                    for _ in proc.stdout:
+                        line_count += 1
+                    if not wait_or_fail(proc, TIMEOUT, "Base coverage generation"):
+                        return (fuzzer, function_name, {})
                     txt_length = line_count
-                diff_length = len([log for log in log_set if len(log) > 1])
+                    nondet = [False] * txt_length
+                    self.exec_in_container(
+                        ['bash', '-c', f'cp -f {base_profdata} {base_profdata_ref}'])
+                else:
+                    base_proc = self.exec_in_container(
+                        cmd=base_show_cmd, envs=base_show_envs, stream=True)
+                    if base_proc.stdout is None:
+                        logger.error(f"base coverage generation failed: {function_name} {fuzzer} baseline stdout not captured")
+                        return (fuzzer, function_name, {})
+                    line_count = compare_streams(
+                        base_proc.stdout,
+                        proc.stdout,
+                        txt_length,
+                        lambda i: nondet.__setitem__(i, True),
+                    )
+                    if line_count is None:
+                        return (fuzzer, function_name, {})
+                    if not wait_or_fail(proc, TIMEOUT, "Base coverage generation"):
+                        return (fuzzer, function_name, {})
+                    if not wait_or_fail(base_proc, TIMEOUT, "Baseline coverage generation"):
+                        return (fuzzer, function_name, {})
+                    if line_count != txt_length:
+                        logger.error(
+                            f"base txt length mismatch, {function_name} {fuzzer} expected {txt_length}, got {line_count}")
+                        return (fuzzer, function_name, {})
+                diff_length = sum(nondet)
                 if diff_length == prev_diff_length and idx > 0:
                     # no non-determinism detected, break early
                     break
@@ -269,37 +340,53 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     diff_result[f'{decompiler}-{option}'] = False
 
         for options, target_lib_path in target_libs.items():
-            target_txt_path = pathlib.Path(self.oss_fuzz_path) / 'build' / 'challenges' / \
-                self.project / function_name / fuzzer / f'{options}.txt'
             try:
+                # Compare target output directly against the frozen baseline,
+                # while ignoring lines marked nondeterministic.
+                base_proc = self.exec_in_container(cmd=base_show_cmd, envs=base_show_envs, stream=True)
+                if base_proc.stdout is None:
+                    logger.error(f"--- CRASH Target coverage generation failed {self.project} {function_name} {fuzzer} {options}: baseline stdout not captured")
+                    diff_result[options] = False
+                    continue
+
                 result = self.exec_in_container(cmd=cmd, envs=[
                     f'LD_LIBRARY_PATH={target_lib_path}:/work/lib/',
                     f'LLVM_PROFILE_FILE=/challenges/{function_name}/{fuzzer}/{options}.profraw',
                     f'OUTPUT_PROFDATA=/challenges/{function_name}/{fuzzer}/{options}.profdata',
-                    f'OUTPUT_TXT=/challenges/{function_name}/{fuzzer}/{options}.txt',
+                    'OUTPUT_TXT=/dev/stdout',
                     f'MAPPING_TXT=/challenges/{function_name}/address_mapping.txt',
                     f'LD_PRELOAD=/oss-fuzz/ld.so',
-                ], timeout=TIMEOUT, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                # Stream and compare line-by-line to reduce memory usage
+                ], stream=True)
+                
+                if result.stdout is None:
+                    logger.error(f"--- CRASH Target coverage generation failed {self.project} {function_name} {fuzzer} {options}: stdout not captured")
+                    diff_result[options] = False
+                    continue
+                
                 target_difference = []
-                with open(str(target_txt_path), 'r') as f:
-                    for i, line in enumerate(f):
-                        line = line.rstrip('\n')
-                        if len(log_set[i]) == 1 and line not in log_set[i]:
-                            target_difference.append(i)
+                line_count = compare_streams(
+                    base_proc.stdout,
+                    result.stdout,
+                    txt_length,
+                    lambda i: target_difference.append(i) if not nondet[i] else None,
+                )
+                if line_count is None:
+                    diff_result[options] = False
+                    continue
+                
+                if not wait_or_fail(result, TIMEOUT, f"--- CRASH Target coverage generation for {self.project} {function_name} {fuzzer} {options}"):
+                    diff_result[options] = False
+                    continue
+                if not wait_or_fail(base_proc, TIMEOUT, f"--- CRASH Baseline coverage generation for {self.project} {function_name} {fuzzer} {options}"):
+                    diff_result[options] = False
+                    continue
+                
                 if len(target_difference) == 0:
-                    logger.info(
-                        f"--- PASS target txt diff {self.project} {function_name} {fuzzer} {options} length:0")
+                    logger.info(f"--- PASS target txt diff {self.project} {function_name} {fuzzer} {options} length:0")
                     diff_result[options] = True
                 else:
-                    logger.error(
-                        f"--- FAIL target txt diff {self.project} {function_name} {fuzzer} {options}, differences length:{len(target_difference)}")
+                    logger.error(f"--- FAIL target txt diff {self.project} {function_name} {fuzzer} {options}, differences length:{len(target_difference)}")
                     diff_result[options] = False
-            except subprocess.CalledProcessError as e:
-                logger.error(f"--- CRASH Target coverage generation failed for {self.project} {function_name} {fuzzer} {options} with exit code {e.returncode}")
-                logger.error(f"stdout: {e.stdout.decode('utf-8', errors='replace') if e.stdout else ''}")
-                logger.error(f"stderr: {e.stderr.decode('utf-8', errors='replace') if e.stderr else ''}")
-                diff_result[options] = False
             except Exception as e:
                 logger.error(
                     f"--- CRASH Target coverage generation failed {self.project} {function_name} {fuzzer} {options}: {e}")
@@ -314,6 +401,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                         rm -rf /challenges/{function_name}/{fuzzer}/*.txt
                         rm -rf /challenges/{function_name}/{fuzzer}/*.profraw
                         rm -rf /challenges/{function_name}/{fuzzer}/*.profdata
+                        rm -rf /challenges/{function_name}/{fuzzer}/*.profdata.ref
                     ''',
                 ]
             )
@@ -321,33 +409,32 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
         return (fuzzer, function_name, diff_result)
 
 
+def add_result(processed_results, result):
+    if not result or len(result) != 3:
+        return
+
+    fuzzer, function, diff_results = result
+
+    for option_key, success in diff_results.items():
+        decompiler, option = option_key.rsplit('-', 1)
+
+        # Build the nested dictionary structure
+        processed_results.setdefault(function, {}) \
+            .setdefault(decompiler, {}) \
+            .setdefault(option, []) \
+            .append((fuzzer, success))
+
+
 def process_results(results_list):
     """Process the results from evaluator.do_execute() into a structured format."""
     processed_results = {}
-
     for result in results_list:
-        if not result or len(result) != 3:
-            continue
-
-        fuzzer, function, diff_results = result
-
-        for option_key, success in diff_results.items():
-            decompiler, option = option_key.rsplit('-', 1)
-
-            # Build the nested dictionary structure
-            processed_results.setdefault(function, {}) \
-                .setdefault(decompiler, {}) \
-                .setdefault(option, []) \
-                .append((fuzzer, success))
-
+        add_result(processed_results, result)
     return processed_results
 
 
 def show_statistics(all_project_results, dataset: datasets.Dataset, decompilers, opts):
     pass_count = {}
-
-    df = dataset.to_pandas()
-    assert isinstance(df, pd.DataFrame)
     function_count = 0
 
     # Count passes and totals
@@ -440,10 +527,8 @@ def main():
                 decompilers = evaluator.decompilers
             if not opts:
                 opts = evaluator.opt_options
-            results = evaluator.do_execute()
-            if results:
-                # Process the results into a structured format
-                processed_results = process_results(results)
+            processed_results = evaluator.do_execute()
+            if processed_results:
                 all_project_results[project] = processed_results
                 # Also save the raw results for reference
                 with open(result_path, 'w') as f:
