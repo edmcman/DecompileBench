@@ -14,6 +14,7 @@ from jsonslicer import JsonSlicer
 import clang.cindex
 import yaml
 from loguru import logger
+from tqdm import tqdm
 
 from libclang import set_libclang_path
 
@@ -308,7 +309,10 @@ class OSSFuzzDatasetGenerator:
         if self._functions is not None:
             return self._functions
         functions = {}
-        for fuzzer in self.fuzzers:
+        # hardcode for qtbase_gui_image_qimage_loadfromdata
+        for fuzzer in tqdm(self.fuzzers, desc="Processing fuzzers", unit='fuzzer'):
+            if False and fuzzer != 'qtbase_gui_image_qimage_loadfromdata':
+                continue
             functions[fuzzer] = self.covered_function_fuzzer(fuzzer)
         self._functions = functions
         return self._functions

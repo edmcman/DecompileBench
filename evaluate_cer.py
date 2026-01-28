@@ -215,8 +215,8 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
         cmd = [
             'bash',
             '-c',
-            f'/out/{fuzzer}_{function_name}_patched -runs=0 -seed=3918206239 /corpus/{fuzzer} && ' +
-            'llvm-profdata merge -sparse $LLVM_PROFILE_FILE -o $OUTPUT_PROFDATA && ' +
+            f'/out/{fuzzer}_{function_name}_patched -runs=0 -seed=3918206239 /corpus/{fuzzer} 1>&2 && ' +
+            'llvm-profdata merge -sparse $LLVM_PROFILE_FILE -o $OUTPUT_PROFDATA 1>&2 && ' +
             f'llvm-cov show -show-instantiations=false -instr-profile $OUTPUT_PROFDATA -object=/out/{fuzzer}_{function_name}_patched > $OUTPUT_TXT'
         ]
 
@@ -250,7 +250,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     stderr = stderr.decode('utf-8', errors='replace')
                 logger.error(f"{context} failed with exit code {proc.returncode}")
                 if stderr:
-                    logger.error(f"stderr: {stderr}")
+                    logger.error(f"stderr: {stderr[-100:]}")
                 return False
             return True
 
@@ -262,10 +262,14 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                 if base_line is None:
                     logger.error(
                         f"base txt length mismatch, {function_name} {fuzzer} expected {expected_len}, got {i + 1}")
+                    logger.error(f"base line {i}: {base_line}, cur line: {cur_line}")
                     return None
                 # cur_line == None => current stream ended early (base had extra lines)
                 if cur_line is None:
-                    logger.error(f"base txt length mismatch, {function_name} {fuzzer} expected fewer lines")
+                    # if i == 0, we crashed when generating coverage, so silently ignore.
+                    if i > 0:
+                        logger.error(f"base txt length mismatch, {function_name} {fuzzer} expected fewer lines")
+                        logger.error(f"base line {i}: {base_line}, cur line: {cur_line}")
                     return None
                 if cur_line.rstrip('\n') != base_line.rstrip('\n'):
                     on_diff(i)
@@ -334,7 +338,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     f"base txt generation failed:{e}")
                 return (fuzzer, function_name, {})
         if not diff_length == prev_diff_length:
-            logger.info(f"diff length cant converge : {fuzzer} {function_name}")
+            logger.info(f"nondeterministic diff length did not converge : {fuzzer} {function_name}")
             return (fuzzer, function_name, {})
 
         diff_result = {}
@@ -379,9 +383,6 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     txt_length,
                     lambda i: target_difference.append(i) if not nondet[i] else None,
                 )
-                if line_count is None:
-                    diff_result[options] = False
-                    continue
                 
                 if not wait_or_fail(result, TIMEOUT, f"--- CRASH Target coverage generation for {self.project} {function_name} {fuzzer} {options}"):
                     diff_result[options] = False
@@ -390,6 +391,11 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                     diff_result[options] = False
                     continue
                 
+                if line_count is None:
+                    logger.error(f"--- DIFFLINES Target coverage generation failed {self.project} {function_name} {fuzzer} {options}: during stream comparison")
+                    diff_result[options] = False
+                    continue
+
                 if len(target_difference) == 0:
                     logger.info(f"--- PASS target txt diff {self.project} {function_name} {fuzzer} {options} length:0")
                     diff_result[options] = True
