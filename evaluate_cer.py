@@ -200,13 +200,12 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
             'challenges' / self.project / function_name / 'libfunction.so'
 
         if not base_lib_path.exists():
-            print(f"base lib path {base_lib_path} does not exist")
+            logger.warning(f"base lib path {base_lib_path} does not exist")
             return (fuzzer, function_name, {})
 
         if not patched_fuzzer_path.exists():
-            print(f"fuzzer path {patched_fuzzer_path} does not exist")
             logger.error(
-                f"testing: fuzzer path {patched_fuzzer_path} does not exist")
+                f"fuzzer path {patched_fuzzer_path} does not exist")
             return (fuzzer, function_name, {})
 
         output_mapping_path = base_lib_path.parent / 'address_mapping.txt'
