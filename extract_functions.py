@@ -183,7 +183,6 @@ class OSSFuzzDatasetGenerator:
         if not stats_path.exists():
             return {}
         functions = {}
-        logger.info(f"Processing stats file: {stats_path}")
         with open(stats_path, 'rb') as f:
             for function in JsonSlicer(f, ('data', 0, 'functions', None)):
                 c_files = [
