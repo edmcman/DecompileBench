@@ -168,6 +168,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
         try:
             if self.patch_binary_jmp_to_function(fuzzer, function_name):
                 return self.diff_base_for_function(fuzzer, function_name)
+            return (fuzzer, function_name, {})
         except Exception as e:
             logger.error(
                 f"link_and_test_for_function failed: {e}")
@@ -235,6 +236,27 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
             f'MAPPING_TXT=/challenges/{function_name}/address_mapping.txt',
         ]
 
+        def _cleanup_proc(proc):
+            """Clean up process handles to avoid zombies."""
+            try:
+                # Kill the process if it's still running
+                if proc.poll() is None:
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
+                # Close file descriptors
+                if proc.stdout:
+                    proc.stdout.close()
+                if proc.stderr:
+                    proc.stderr.close()
+                if proc.stdin:
+                    proc.stdin.close()
+            except Exception:
+                pass
+
         def wait_or_fail(proc, timeout, context):
             try:
                 proc.wait(timeout=timeout)
@@ -242,6 +264,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                 proc.kill()
                 proc.wait()
                 logger.error(f"{context} timed out")
+                _cleanup_proc(proc)
                 return False
             if proc.returncode != 0:
                 stderr = proc.stderr.read() if proc.stderr else ''
@@ -250,7 +273,9 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                 logger.error(f"{context} failed with exit code {proc.returncode}")
                 if stderr:
                     logger.error(f"stderr: {stderr[-100:]}")
+                _cleanup_proc(proc)
                 return False
+            _cleanup_proc(proc)
             return True
 
         # Compare a current stream to the frozen baseline (first run).
@@ -291,6 +316,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                 ], stream=True)
                 if proc.stdout is None:
                     logger.error("base coverage generation failed: stdout not captured")
+                    _cleanup_proc(proc)
                     return (fuzzer, function_name, {})
                 if idx == 0:
                     # First run: establish baseline length and snapshot profdata.
@@ -308,6 +334,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                         cmd=base_show_cmd, envs=base_show_envs, stream=True)
                     if base_proc.stdout is None:
                         logger.error(f"base coverage generation failed: {function_name} {fuzzer} baseline stdout not captured")
+                        _cleanup_proc(base_proc)
                         return (fuzzer, function_name, {})
                     line_count = compare_streams(
                         base_proc.stdout,
@@ -316,14 +343,18 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                         lambda i: nondet.__setitem__(i, True),
                     )
                     if line_count is None:
+                        _cleanup_proc(base_proc)
+                        _cleanup_proc(proc)
                         return (fuzzer, function_name, {})
                     if not wait_or_fail(proc, TIMEOUT, "Base coverage generation"):
+                        _cleanup_proc(base_proc)
                         return (fuzzer, function_name, {})
                     if not wait_or_fail(base_proc, TIMEOUT, "Baseline coverage generation"):
                         return (fuzzer, function_name, {})
                     if line_count != txt_length:
                         logger.error(
                             f"base txt length mismatch, {function_name} {fuzzer} expected {txt_length}, got {line_count}")
+                        # Both processes already cleaned up by wait_or_fail
                         return (fuzzer, function_name, {})
                 diff_length = sum(nondet)
                 if diff_length == prev_diff_length and idx > 0:
@@ -335,6 +366,14 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
             except Exception as e:
                 logger.error(
                     f"base txt generation failed:{e}")
+                # Clean up any running processes
+                try:
+                    if 'proc' in locals():
+                        _cleanup_proc(proc)
+                    if 'base_proc' in locals():
+                        _cleanup_proc(base_proc)
+                except Exception:
+                    pass
                 return (fuzzer, function_name, {})
         if not diff_length == prev_diff_length:
             logger.info(f"nondeterministic diff length did not converge : {fuzzer} {function_name}")
@@ -358,6 +397,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                 base_proc = self.exec_in_container(cmd=base_show_cmd, envs=base_show_envs, stream=True)
                 if base_proc.stdout is None:
                     logger.error(f"--- CRASH Target coverage generation failed {self.project} {function_name} {fuzzer} {options}: baseline stdout not captured")
+                    _cleanup_proc(base_proc)
                     diff_result[options] = False
                     continue
 
@@ -372,6 +412,8 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                 
                 if result.stdout is None:
                     logger.error(f"--- CRASH Target coverage generation failed {self.project} {function_name} {fuzzer} {options}: stdout not captured")
+                    _cleanup_proc(base_proc)
+                    _cleanup_proc(result)
                     diff_result[options] = False
                     continue
                 
@@ -384,6 +426,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
                 )
                 
                 if not wait_or_fail(result, TIMEOUT, f"--- CRASH Target coverage generation for {self.project} {function_name} {fuzzer} {options}"):
+                    _cleanup_proc(base_proc)
                     diff_result[options] = False
                     continue
                 if not wait_or_fail(base_proc, TIMEOUT, f"--- CRASH Baseline coverage generation for {self.project} {function_name} {fuzzer} {options}"):
@@ -404,6 +447,14 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
             except Exception as e:
                 logger.error(
                     f"--- CRASH Target coverage generation failed {self.project} {function_name} {fuzzer} {options}: {e}")
+                # Clean up any running processes
+                try:
+                    if 'base_proc' in locals():
+                        _cleanup_proc(base_proc)
+                    if 'result' in locals():
+                        _cleanup_proc(result)
+                except Exception:
+                    pass
                 diff_result[options] = False
 
         # Temporary
