@@ -213,8 +213,9 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
         get_func_offsets(base_lib_path, patched_fuzzer_path,
                          output_mapping_path)
         cmd = [
-            'bash',
+            'timeout', '-k', '10', str(TIMEOUT), 'bash',
             '-c',
+            'ulimit -c 0 && ' +
             f'/out/{fuzzer}_{function_name}_patched -runs=0 -seed=3918206239 /corpus/{fuzzer} 1>&2 && ' +
             'llvm-profdata merge -sparse $LLVM_PROFILE_FILE -o $OUTPUT_PROFDATA 1>&2 && ' +
             f'llvm-cov show -show-instantiations=false -instr-profile $OUTPUT_PROFDATA -object=/out/{fuzzer}_{function_name}_patched > $OUTPUT_TXT'
@@ -227,8 +228,9 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
         base_profdata_ref = f'{base_profdata}.ref'
         # We need show-instantiations=false because otherwise it changes the number of lines emitted
         base_show_cmd = [
-            'bash',
+            'timeout', '-k', '10', str(TIMEOUT), 'bash',
             '-c',
+            'ulimit -c 0 && ' +
             f'llvm-cov show -show-instantiations=false -instr-profile {base_profdata_ref} -object=/out/{fuzzer}_{function_name}_patched'
         ]
         base_show_envs = [
@@ -283,6 +285,7 @@ class ReexecutableRateEvaluator(OSSFuzzDatasetGenerator):
             line_count = 0
             for i, (base_line, cur_line) in enumerate(zip_longest(base_stream, current_stream, fillvalue=None)):
                 # base_line == None  => base stream ended early (base shorter than current)
+
                 if base_line is None:
                     logger.error(
                         f"base txt length mismatch, {function_name} {fuzzer} expected {expected_len}, got {i + 1}")

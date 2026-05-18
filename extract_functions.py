@@ -184,7 +184,7 @@ class OSSFuzzDatasetGenerator:
             return {}
         functions = {}
         with open(stats_path, 'rb') as f:
-            for function in JsonSlicer(f, ('data', 0, 'functions', None)):
+            for function in JsonSlicer(f, ('data', 0, 'functions', None), yajl_allow_partial_values=True):
                 c_files = [
                     file for file in function['filenames']
                     if file.endswith('.c')
@@ -382,6 +382,7 @@ class OSSFuzzDatasetGenerator:
             cmd = [
                 'docker',
                 'run',
+                '--init',
                 '-dit',
                 '--privileged',
                 '--name',
